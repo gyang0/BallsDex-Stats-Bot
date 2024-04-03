@@ -1,0 +1,15 @@
+{
+  "name": "ballsdex-stats-logger---discord-bot",
+  "version": "1.0.0",
+  "description": "A bot to log the frequencies of countryball type spawns from BallsDex",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Gene Yang",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5"
+  }
+}
