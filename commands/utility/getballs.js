@@ -1,9 +1,18 @@
+// Node filestream
+const fs = require("fs");
+
 const { SlashCommandBuilder } = require("discord.js");
 const PNG = require('pngjs').PNG;
 const pixelmatch = require('pixelmatch');
-const jimp = require("jimp");
 
-const fs = require("fs");
+// Image compressions
+const axios = require("axios");
+const sharp = require("sharp"); // Sharp is fast for resizing images
+
+// To use GitHub API endpoints
+const { Octokit } = require("octokit");
+const octokit = new Octokit({});
+
 
 // Environment variables
 require('dotenv').config();
@@ -74,33 +83,42 @@ let countries = [
 ];
 
 
-// https://www.youtube.com/watch?v=FKbC83Te1Xw
-// Converts an image URL to an image buffer with jimp
-const urlToBuffer = async (url) => {
-    return new Promise(async (resolve, reject) => {
-        // Read image with jimp
-        await jimp.read(url, async (err, image) => {
-            if(err){
-                console.log("Error when reading image with jimp: " + err);
-                reject(err);
-            }
+// Caching image buffers to avoid fetching every time
+// { key: url, value: image buffer }
+let ghBufferCache = new Map();
 
-            // Nice dimensions
-            image.resize(400, 400);
-            return image.getBuffer(jimp.MIME_PNG, (err, buffer) => {
-                if(err){
-                    console.log("Error when converting image URL to buffer: " + err);
-                    reject(err);
-                }
-                resolve(buffer);
-            });
-        });
+
+// https://www.youtube.com/watch?v=FKbC83Te1Xw
+// https://github.com/lovell/sharp/issues/1901#issuecomment-538689406
+// Converts an image URL to an image buffer with jimp
+async function urlToBuffer(myURL){
+    // yay, we have a cached buffer
+    if(ghBufferCache.has(myURL)){
+        return ghBufferCache.get(myURL);
+    }
+
+    // No cached result, so we get the image with axios.
+    const img = await axios({
+        url: myURL,
+        responseType: "arraybuffer"
     });
+
+    const imgBuffer = Buffer.from(img.data, 'utf-8');
+
+    const res = await sharp(imgBuffer)
+        .resize(400, 400)
+        .png()
+        .toBuffer();
+
+    // Cache the result
+    ghBufferCache.set(myURL, res);
+
+    return res;
 }
 
 // https://www.youtube.com/watch?v=FKbC83Te1Xw
 // Compares 2 images and gets their difference with Pixelmatch
-const compareImages = async (url1, url2) => {
+async function compareImages(url1, url2){
     try {
         const img1Buffer = await urlToBuffer(url1);
         const img2Buffer = await urlToBuffer(url2);
@@ -126,7 +144,6 @@ const compareImages = async (url1, url2) => {
 
     } catch(err){
         console.log("Error when comparing images: " + err);
-        throw err;
     }
 }
 
@@ -203,7 +220,7 @@ module.exports = {
 
     async execute(interaction) {
         const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-        interaction.reply("This may take a while, please wait a few minutes...");
+        /*interaction.reply("This may take a while, please wait a few minutes...");
         
         // Map of numeric BallsDex spawn message IDs that were verified captured
         // i.e. ones for which we could find catch messages
@@ -264,12 +281,77 @@ module.exports = {
         channel.send({
             files: ["data.txt"],
             content: `<@${interaction.member.user.id}> Your data:`
+        });*/
+
+
+
+
+        // Testing image comparisons
+        let imgs = [
+            "https://cdn.discordapp.com/attachments/1215530757192417290/1229299583683657799/nt_UUOGStunThpAjQq.png?ex=662f2d74&is=661cb874&hm=356ce1d0aaa26878bc824c188d492cd4384535f0fb0e3cfd76ed9dcc2d4a15b6&",
+            "https://cdn.discordapp.com/attachments/1215530757192417290/1226273978537087007/nt_loaKTpbAVojXWls.png?ex=662d6623&is=661af123&hm=ea270e8eebc65c80c0f54df2eaf8f5843c5586fba26c839c4347e6b6ab805816&",
+            "https://cdn.discordapp.com/attachments/1215530757192417290/1224817421161070712/nt_IAsRYcnXwmmVRFT.png?ex=6628199d&is=6615a49d&hm=81047489050e1b471ce219ff38fc07693f2f4627e52f4275aa9e3216975dbb1a&",
+            "https://cdn.discordapp.com/attachments/1215530757192417290/1223996668941439096/nt_sQGCyJwcgTrwHtB.png?ex=662e57ba&is=661be2ba&hm=4b02427dfcd84b5e8408b573f338c899dffcf3e3fcbfccd2a3e477cbbfadb9fe&",
+            "https://cdn.discordapp.com/attachments/1215530757192417290/1222542386446733373/nt_INlBiZiZeImPCFE.png?ex=66290d52&is=66169852&hm=c673baa1ec1be04dfcf3c754adf4d4f0688a989881db4f792660511c8575a0a3&"
+        ];
+
+        const repoContent = await octokit.rest.repos.getContent({
+            owner: "gyang0",
+            repo: "BallsDex-Spawnarts"
         });
+
+
+        // Clear the GitHub image buffer cache just in case
+        ghBufferCache.clear();
+
+        // The tedious process of comparing with every spawnart associated with every country
+        for(let i = 0; i < imgs.length; i++){
+
+            let bestGuess = {
+                country: "",
+                score: 0.00
+            };
+
+            // These surface level files in repoContent.data are all the spawn images.
+            for(let j = 0; j < repoContent.data.length; j++){
+
+                // Ignore anything that isn't an image
+                if(/^.*\.(png)$/.test(repoContent.data[j].name) === false){
+                    continue;
+                }
+
+                // Get similarity score between the 2 images
+                let curScore = await compareImages(imgs[i], repoContent.data[j].download_url);
+
+                // Found a better guess than the previous one
+                if(curScore > bestGuess.score){
+                    // Image format is "[country]_[version].png", e.g. [albania]_2.png
+                    // We just want the country name - the substring inside [].
+                    let country = repoContent.data[j].name.substr(
+                        1,
+                        repoContent.data[j].name.indexOf(']') - 1
+                    );
+
+                    bestGuess.country = country;
+                    bestGuess.score = curScore;
+                }
+            }
+
+            console.log("Best guess is " + bestGuess.country + ", " + bestGuess.score + "% sure.");
+        }
+
+
 
         //console.log(dataContents);
 
         // TODO (for bugfixing)
         // If the country name isn't found in any of the folder names, output an error. This will fix most surface level bugs.
         // Start testing image comparisons and its speed before committing to adding everything.
+        // 1. Test out on Pixel Cafe with nothing and see how much it recognizes
+        // 2. Add 1 image for each country and see how much it recognizes
+        // 3. Add more if necessary.
+        // 4. Does compressing the images more help with speed? As in 300x300, 250x250, or even 200x200.
+        // 6. Cache images
+        // https://github.com/lovell/sharp/issues/1901
     }
 };
