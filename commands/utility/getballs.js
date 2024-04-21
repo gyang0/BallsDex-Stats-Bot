@@ -11,7 +11,6 @@ const sharp = require("sharp"); // Sharp is fast for resizing images
 
 // To use GitHub API endpoints
 const { Octokit } = require("octokit");
-const octokit = new Octokit({});
 
 
 // Environment variables
@@ -20,14 +19,21 @@ require('dotenv').config();
 
 // List of country names
 // From https://ballsdex.miraheze.org/wiki/Rarity_List, 4/15/2024
-// Hudson Bay Company and Polish Underground State were removed (uncatchable)
+// Hudson Bay Company and Polish Underground State are now uncatchable but kept.
+/*
+    Circumflex over O in Cote d'Ivoire removed
+    "Free Congo State" changed to "Congo Free State"
+    "Russian SFSR" changed to "Russian Soviet Federative Socialist Republic"
+    "Ukrainian SSR" changed to "Ukrainian Soviet Socialist Republic"
+    "Bosnia" changed to "Bosnia and Herzegovina"
+*/
 let countries = [
     "British Empire", "Reichtangle", "Russian Empire", "Kalmar Union", "Roman Empire",
     "Qin Dynasty", "German Empire", "Austria-Hungary", "Hunnic Empire", "Japanese Empire",
     "Republic of China", "Soviet Union", "United States", "Vatican", "Russia",
     "China", "India", "Ancient Greece", "Japan", "Korea",
     "Napoleonic France", "Ottoman Empire", "South Korea", "France", "Spanish Empire",
-    "Achaemenid Empire", "Macedon", "United Kingdom ", "Pakistan", "Ancient Egypt",
+    "Achaemenid Empire", "Macedon", "United Kingdom", "Pakistan", "Ancient Egypt",
     "Brazil", "Byzantium", "Greenland", "Portuguese Empire", "Qing",
     "British Raj", "Carthage", "Italy", "Kingdom of Italy", "Egypt",
     "Russian Soviet Federative Socialist Republic", "Turkey", "Iran", "Kingdom of Greece", "African Union",
@@ -43,7 +49,7 @@ let countries = [
     "Czechia", "Iraq", "Malaysia", "Mexico", "Myanmar",
     "Netherlands", "Nigeria", "Norway", "Peru", "Philippines",
     "Portugal", "Prussia", "Romania", "Singapore", "Switzerland",
-    "Syria", "Tuvalu", "UAE", "Venezuela", "Ukrainian SSR",
+    "Syria", "Tuvalu", "UAE", "Venezuela", "Ukrainian Soviet Socialist Republic",
     "Ancient Athens", "Ancient Sparta", "Babylon", "Czechoslovakia", "Ethiopian Empire",
     "French Indochina", "Nauru", "Numidia", "Quebec", "Siam",
     "South Vietnam", "Taiwan", "Wales", "West Germany", "Cuba",
@@ -58,13 +64,13 @@ let countries = [
     "Jamaica", "Maldives", "Northern Ireland", "Polish Underground State", "Tibet",
     "Vichy France", "Andorra", "Brunei", "Byelorussian Soviet Socialist Republic", "Micronesia",
     "Tonga", "Barbados", "Marshall Islands", "Armenia", "Bahrain",
-    "Cambodia", "Chad", "Equatorial Guinea", "Free Congo State", "Georgia",
+    "Cambodia", "Chad", "Equatorial Guinea", "Congo Free State", "Georgia",
     "Ghana", "Guatemala", "Guyana", "Hudson Bay Company", "Ireland",
     "Kyrgyzstan", "Latvia", "Lithuania", "Mali", "Malta",
     "Mongolia", "New Zealand", "Samoa", "Slovenia", "Togo",
     "Uganda", "Uruguay", "Zambia", "Zimbabwe", "Malawi",
     "Costa Rica", "Dominica", "Guinea-Bissau", "Sao Tome and Principe", "Tannu Tuva",
-    "Seychelles", "Afghanistan", "Albania", "Belize", "Bosnia",
+    "Seychelles", "Afghanistan", "Albania", "Belize", "Bosnia and Herzegovina",
     "Botswana", "Cameroon", "Ceylon", "Congo", "Cote d'Ivoire",
     "Dominican Republic", "Eritrea", "Estonia", "Eswatini", "Fiji",
     "Free City of Danzig", "Gambia", "Haiti", "Honduras", "Khiva",
@@ -81,6 +87,18 @@ let countries = [
     "Rwanda", "Senegal", "Sierra Leone", "Somalia", "Suriname",
     "Timor-Leste", "Djibouti"
 ];
+
+/**
+ * Certain country names may have changed in BallsDex updates
+ * Those should still be unified under a single name to avoid bugs.
+ */
+function correctCountryName(str){
+    str = str.toLowerCase();
+    
+    if(str === "bosnia") return "bosnia and herzegovina";
+
+    return str;
+}
 
 
 // Caching image buffers to avoid fetching every time
@@ -107,6 +125,7 @@ async function urlToBuffer(myURL){
 
     const res = await sharp(imgBuffer)
         .resize(400, 400)
+        .greyscale()
         .png()
         .toBuffer();
 
@@ -178,19 +197,24 @@ async function getSpawns(channel, verifiedCaught, numCaught){
                 // 2. Message must have content "A wild countryball appeared!"
                 messagePage.forEach(msg => {
                     if(msg.author.id === process.env.BALLSDEX_USER_ID){
-                        if(msg.content.includes("You caught ")){
-                            let startInd = msg.content.indexOf("You caught ") + "You caught **".length;
-                            let endInd = msg.content.indexOf("!");
+                        if(msg.content.includes("You caught **")){
+                            let startInd = msg.content.indexOf("You caught **") + "You caught **".length;
+                            let endInd = msg.content.indexOf('!');
                             let country = msg.content.substring(startInd, endInd).toLowerCase();
+
+                            // Sometimes names of countries change, but we want to avoid that.
+                            country = correctCountryName(country);
 
                             // Catch messages are always a reply to the spawn message.
                             // The spawn message directed to by the parent of the catch message is verified caught.
                             verifiedCaught.set(msg.reference.messageId, true);
 
-                            if(numCaught.has(country)) numCaught.set(country, numCaught.get(country) + 1);
-                            else numCaught.set(country, 1);
-
-                            //console.log(country + ": " + numCaught.get(country));
+                            if(!numCaught.has(country)){
+                                console.error("ERROR! The following country name does not exist in my database: " + country);
+                                return [];
+                            } else {
+                                numCaught.set(country, numCaught.get(country) + 1);
+                            }
                         }
 
                         else if(msg.content === "A wild countryball appeared!"){
@@ -199,6 +223,10 @@ async function getSpawns(channel, verifiedCaught, numCaught){
                             spawns.push([msg.id, imgURL]);
 
                             //console.log(imgURL);
+
+                            if(spawns.length % 100 === 0){
+                                console.log(spawns.length + " spawns counted.");
+                            }
                         }
                     }
                 });
@@ -208,8 +236,49 @@ async function getSpawns(channel, verifiedCaught, numCaught){
             });
     }
 
+    console.log("Total " + spawns.length + " spawns counted.");
+
     // Return the spawn message IDs
     return spawns;
+}
+
+/**
+ * Make a guess on what countryball an image has
+ * @param imgURL - The URL of the image in question
+ * @param repoContent - Contents of the spawnart GitHub repo (through the API)
+ */
+async function getBestGuess(imgURL, repoContent){
+    let bestGuess = {
+        country: "",
+        score: -1.00
+    };
+
+    // These surface level files in repoContent.data are all the spawn images.
+    for(let i = 0; i < repoContent.data.length; i++){
+
+        // Ignore anything that isn't an image or gif
+        if(/^.*\.(png|gif)$/.test(repoContent.data[i].name) === false){
+            continue;
+        }
+
+        // Get similarity score between the 2 images
+        let curScore = await compareImages(imgURL, repoContent.data[i].download_url);
+
+        // Found a better guess than the previous one
+        if(curScore > bestGuess.score){
+            // Image format is "[country]_[version].png", e.g. [albania]_2.png
+            // We just want the country name - the substring inside [].
+            let country = repoContent.data[i].name.substr(
+                1,
+                repoContent.data[i].name.indexOf(']') - 1
+            );
+
+            bestGuess.country = country;
+            bestGuess.score = curScore;
+        }
+    }
+
+    return bestGuess;
 }
 
 
@@ -220,7 +289,7 @@ module.exports = {
 
     async execute(interaction) {
         const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-        /*interaction.reply("This may take a while, please wait a few minutes...");
+        interaction.reply("This is probably going to take really long. Go do something else and I'll ping you when I'm done.");
         
         // Map of numeric BallsDex spawn message IDs that were verified captured
         // i.e. ones for which we could find catch messages
@@ -229,6 +298,9 @@ module.exports = {
 
         // Map of {key: country name, value: number of times it was caught}
         let numCaught = new Map();
+        for(let i = 0; i < countries.length; i++){
+            numCaught.set(countries[i].toLowerCase(), 0);
+        }
 
         // Array of [spawn message ID, spawn image URL]
         let spawns = await getSpawns(channel, verifiedCaught, numCaught);
@@ -251,15 +323,53 @@ module.exports = {
             }
         }
 
+
+        // Now we attempt to automatically identify unverified spawns
+
+        // URLs of images that are still unverified (less than 95% match)
+        let stillUnverified = [];
+
+        // Connect to GitHub API
+        const octokit = new Octokit({});
+        const repoContent = await octokit.rest.repos.getContent({
+            owner: "gyang0",
+            repo: "BallsDex-Spawnarts"
+        });
+
+        // Clear the GitHub image buffer cache just in case
+        ghBufferCache.clear();
+
+        console.log("Now analyzing " + unverified.length + " unverified spawns...");
+        for(let i = 0; i < unverified.length; i++){
+            let guess = await getBestGuess(unverified[i], repoContent);
+
+            if(guess.score < 95.00){
+                stillUnverified.push(unverified[i]);
+
+            } else {
+                numCaught[guess.country]++;
+            }
+
+            console.log((i + 1) + "/" + unverified.length + " done.");
+            //console.log(unverified[i] + "\nIdentified as " + guess.country + " with " + guess.score + " certainty.\n");
+        }
+        console.log("Finished. " + (unverified.length - stillUnverified.length) + " balls automatically identified.");
+
+
         // Organize data into readable format
         let dataContents = "There were a total of " + spawns.length + " ball spawns in this channel.\n";
         dataContents += "Of these, " + (spawns.length - unverified.length) + " balls were caught.\n";
-        dataContents += (unverified.length + " balls remained uncaught.\n\n");
+        dataContents += (unverified.length + " balls remained uncaught.\n");
+        dataContents += "\t- Of these, " + (unverified.length - stillUnverified.length) + " balls were identified automatically (95% certainty or more).\n";
+        dataContents += "\t- There are " + (stillUnverified.length) + " balls that require manual identification.\n\n";
         
-        dataContents += ">>>>>>>>>> Unverified spawn images (NOT COUNTED BY BOT, FACTOR THESE INTO THE TOTAL)\n";
-        dataContents += "For your own sanity, use https://www.openallurls.com/ to open these links.\n";
-        for(let i = 0; i < unverified.length; i++){
-            dataContents += unverified[i] + "\n";
+        dataContents += ">>>>>>>>>> Unverified spawn images (FACTOR THESE INTO THE TOTAL)\n";
+        dataContents += ">>>>>>>>>> For your own sanity, use https://www.openallurls.com/ to open these links.\n";
+        if(stillUnverified.length === 0){
+            dataContents += "No unclear images, yay!\n";
+        }
+        for(let i = 0; i < stillUnverified.length; i++){
+            dataContents += stillUnverified[i] + "\n";
         }
 
         dataContents += "\n";
@@ -267,12 +377,9 @@ module.exports = {
         for(let i = 0; i < countries.length; i++){
             countries[i] = countries[i].toLowerCase();
 
-            if(numCaught.has(countries[i])){
-                dataContents += (countries[i] + ": " + numCaught.get(countries[i]) + "\n");
-            } else {
-                dataContents += countries[i] + ": 0\n";
-            }
+            dataContents += (countries[i] + ": " + numCaught.get(countries[i]) + "\n");
         }
+
 
         // Write data to file
         fs.writeFile('data.txt', dataContents, function(err){
@@ -281,77 +388,14 @@ module.exports = {
         channel.send({
             files: ["data.txt"],
             content: `<@${interaction.member.user.id}> Your data:`
-        });*/
-
-
-
-
-        // Testing image comparisons
-        let imgs = [
-            "https://cdn.discordapp.com/attachments/1215530757192417290/1229299583683657799/nt_UUOGStunThpAjQq.png?ex=662f2d74&is=661cb874&hm=356ce1d0aaa26878bc824c188d492cd4384535f0fb0e3cfd76ed9dcc2d4a15b6&",
-            "https://cdn.discordapp.com/attachments/1215530757192417290/1226273978537087007/nt_loaKTpbAVojXWls.png?ex=662d6623&is=661af123&hm=ea270e8eebc65c80c0f54df2eaf8f5843c5586fba26c839c4347e6b6ab805816&",
-            "https://cdn.discordapp.com/attachments/1215530757192417290/1224817421161070712/nt_IAsRYcnXwmmVRFT.png?ex=6628199d&is=6615a49d&hm=81047489050e1b471ce219ff38fc07693f2f4627e52f4275aa9e3216975dbb1a&",
-            "https://cdn.discordapp.com/attachments/1215530757192417290/1223996668941439096/nt_sQGCyJwcgTrwHtB.png?ex=662e57ba&is=661be2ba&hm=4b02427dfcd84b5e8408b573f338c899dffcf3e3fcbfccd2a3e477cbbfadb9fe&",
-            "https://cdn.discordapp.com/attachments/1215530757192417290/1222542386446733373/nt_INlBiZiZeImPCFE.png?ex=66290d52&is=66169852&hm=c673baa1ec1be04dfcf3c754adf4d4f0688a989881db4f792660511c8575a0a3&"
-        ];
-
-        const repoContent = await octokit.rest.repos.getContent({
-            owner: "gyang0",
-            repo: "BallsDex-Spawnarts"
         });
 
+        
 
-        // Clear the GitHub image buffer cache just in case
-        ghBufferCache.clear();
-
-        // The tedious process of comparing with every spawnart associated with every country
-        for(let i = 0; i < imgs.length; i++){
-
-            let bestGuess = {
-                country: "",
-                score: 0.00
-            };
-
-            // These surface level files in repoContent.data are all the spawn images.
-            for(let j = 0; j < repoContent.data.length; j++){
-
-                // Ignore anything that isn't an image
-                if(/^.*\.(png)$/.test(repoContent.data[j].name) === false){
-                    continue;
-                }
-
-                // Get similarity score between the 2 images
-                let curScore = await compareImages(imgs[i], repoContent.data[j].download_url);
-
-                // Found a better guess than the previous one
-                if(curScore > bestGuess.score){
-                    // Image format is "[country]_[version].png", e.g. [albania]_2.png
-                    // We just want the country name - the substring inside [].
-                    let country = repoContent.data[j].name.substr(
-                        1,
-                        repoContent.data[j].name.indexOf(']') - 1
-                    );
-
-                    bestGuess.country = country;
-                    bestGuess.score = curScore;
-                }
-            }
-
-            console.log("Best guess is " + bestGuess.country + ", " + bestGuess.score + "% sure.");
-        }
-
-
-
-        //console.log(dataContents);
 
         // TODO (for bugfixing)
-        // If the country name isn't found in any of the folder names, output an error. This will fix most surface level bugs.
-        // Start testing image comparisons and its speed before committing to adding everything.
-        // 1. Test out on Pixel Cafe with nothing and see how much it recognizes
-        // 2. Add 1 image for each country and see how much it recognizes
-        // 3. Add more if necessary.
-        // 4. Does compressing the images more help with speed? As in 300x300, 250x250, or even 200x200.
-        // 6. Cache images
         // https://github.com/lovell/sharp/issues/1901
+        // Test with Ireland
+        // Test # of captures and # of spawns - is it really a cache problem?
     }
 };
