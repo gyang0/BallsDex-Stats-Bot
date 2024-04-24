@@ -85,7 +85,16 @@ let countries = [
     "Luxembourg", "Madagascar", "Mauritania", "Mauritius", "Montenegro",
     "Namibia", "North Macedonia", "Panama", "Papua New Guinea", "Paris Commune",
     "Rwanda", "Senegal", "Sierra Leone", "Somalia", "Suriname",
-    "Timor-Leste", "Djibouti"
+    "Timor-Leste", "Djibouti",
+
+
+    // New balls (no spawnart associated yet)
+    "Ming Dynasty", "Majapahit", "Mali Empire", "Second French Empire", "Swedish Empire",
+    "Khedivate of Egypt", "Principality of Moldavia", "Yuan Dynasty", "Republic of Venice",
+    "Safavid Empire", "Kingdom of Sardinia", "Grand Duchy of Tuscany", "Mughal Empire",
+    "Parthian Empire", "Liberian Union", "Fatimid Caliphate", "Austrian Empire", "Kingdom of Brandenburg",
+    "Holy Roman Empire", "Nanda Empire", "Polish-Lithuanian Commonwealth", "Golden Horde",
+    "Khmer Empire", "Kingdom of Hungary", "Qajar Dynasty", "Mongol Empire"
 ];
 
 /**
@@ -135,6 +144,7 @@ async function urlToBuffer(myURL){
     return res;
 }
 
+
 // https://www.youtube.com/watch?v=FKbC83Te1Xw
 // Compares 2 images and gets their difference with Pixelmatch
 async function compareImages(url1, url2){
@@ -167,9 +177,10 @@ async function compareImages(url1, url2){
 }
 
 
-// https://stackoverflow.com/questions/63322284/discord-js-get-an-array-of-all-messages-in-a-channel
 /**
  * Returns an array of spawn data
+ * https://stackoverflow.com/questions/55153125/fetch-more-than-100-messages?rq=4
+ * https://stackoverflow.com/questions/63322284/discord-js-get-an-array-of-all-messages-in-a-channel
  * 
  * @param channel - BallsDex spawn channel
  * @param verifiedCaught - Map of {spawn ID, true if verified caught}. Values changed within function. MUST BE PRESENT.
@@ -177,68 +188,63 @@ async function compareImages(url1, url2){
  * @return spawns - Array of [spawn message IDs, image URL]
  */
 async function getSpawns(channel, verifiedCaught, numCaught){
-    // Array of numeric BallsDex spawn message IDs
     let spawns = [];
+    let last_id;
 
 
-    // Create message pointer
-    let message = await channel.messages
-        .fetch({ limit: 1 })
-        .then(messagePage => (messagePage.size === 1 ? messagePage.at(0) : null));
+    // Pagination to get all messages
+    while (true) {
+        const options = { limit: 100 };
+        if (last_id) {
+            options.before = last_id;
+        }
 
+        // Get messages in the channel
+        const messages = await channel.messages.fetch(options);
 
-    while (message) {
-        await channel.messages
-            .fetch({ limit: 100, before: message.id })
-            .then(messagePage => {
+        // Push messages from BallsDex into an array
+        messages.forEach(msg => {
+            if(msg.author.id === process.env.BALLSDEX_USER_ID){
                 
-                // Limiting messages to BallsDex spawns
-                // 1. Message must be from BallsDex
-                // 2. Message must have content "A wild countryball appeared!"
-                messagePage.forEach(msg => {
-                    if(msg.author.id === process.env.BALLSDEX_USER_ID){
-                        if(msg.content.includes("You caught **")){
-                            let startInd = msg.content.indexOf("You caught **") + "You caught **".length;
-                            let endInd = msg.content.indexOf('!');
-                            let country = msg.content.substring(startInd, endInd).toLowerCase();
+                // Spawns & catch messages
+                if(msg.content.includes("You caught **")){
+                    let startInd = msg.content.indexOf("You caught **") + "You caught **".length;
+                    let endInd = msg.content.indexOf('!');
+                    let country = msg.content.substring(startInd, endInd).toLowerCase();
 
-                            // Sometimes names of countries change, but we want to avoid that.
-                            country = correctCountryName(country);
+                    // Sometimes names of countries change, but we want to avoid that.
+                    country = correctCountryName(country);
 
-                            // Catch messages are always a reply to the spawn message.
-                            // The spawn message directed to by the parent of the catch message is verified caught.
-                            verifiedCaught.set(msg.reference.messageId, true);
+                    // Catch messages are always a reply to the spawn message.
+                    // The spawn message directed to by the parent of the catch message is verified caught.
+                    verifiedCaught.set(msg.reference.messageId, true);
 
-                            if(!numCaught.has(country)){
-                                console.error("ERROR! The following country name does not exist in my database: " + country);
-                                return [];
-                            } else {
-                                numCaught.set(country, numCaught.get(country) + 1);
-                            }
-                        }
-
-                        else if(msg.content === "A wild countryball appeared!"){
-                            // Get URL of countryball image
-                            let imgURL = msg.attachments.first().url;
-                            spawns.push([msg.id, imgURL]);
-
-                            //console.log(imgURL);
-
-                            if(spawns.length % 100 === 0){
-                                console.log(spawns.length + " spawns counted.");
-                            }
-                        }
+                    if(!numCaught.has(country)){
+                        console.error("ERROR! The following country name does not exist in my database: " + country);
                     }
-                });
 
-                // Update our message pointer to be the last message on the page of messages
-                message = 0 < messagePage.size ? messagePage.at(messagePage.size - 1) : null;
-            });
+                    numCaught.set(country, numCaught.get(country) + 1);
+
+                } else if(msg.content === "A wild countryball appeared!"){
+                    // Get URL of countryball image
+                    let imgURL = msg.attachments.first().url;
+                    spawns.push([msg.id, imgURL]);
+
+                    // It's nice to keep track of progress
+                    if(spawns.length % 100 === 0){
+                        console.log(spawns.length + " spawns counted.");
+                    }
+                }
+            }
+        });
+
+        last_id = messages.last().id;
+
+        if (messages.size != 100) {
+            break;
+        }
     }
 
-    console.log("Total " + spawns.length + " spawns counted.");
-
-    // Return the spawn message IDs
     return spawns;
 }
 
@@ -248,10 +254,10 @@ async function getSpawns(channel, verifiedCaught, numCaught){
  * @param repoContent - Contents of the spawnart GitHub repo (through the API)
  */
 async function getBestGuess(imgURL, repoContent){
-    let bestGuess = {
+    /*let bestGuess = {
         country: "",
         score: -1.00
-    };
+    };*/
 
     // These surface level files in repoContent.data are all the spawn images.
     for(let i = 0; i < repoContent.data.length; i++){
@@ -264,22 +270,25 @@ async function getBestGuess(imgURL, repoContent){
         // Get similarity score between the 2 images
         let curScore = await compareImages(imgURL, repoContent.data[i].download_url);
 
-        // Found a better guess than the previous one
-        if(curScore > bestGuess.score){
-            // Image format is "[country]_[version].png", e.g. [albania]_2.png
-            // We just want the country name - the substring inside [].
+        // Short-circuit: more than 95% matching image found
+        if(curScore >= 95){
             let country = repoContent.data[i].name.substr(
                 1,
                 repoContent.data[i].name.indexOf(']') - 1
             );
 
-            bestGuess.country = country;
-            bestGuess.score = curScore;
+            return {
+                country: country,
+                score: curScore
+            };
         }
     }
 
-    return bestGuess;
+    return { country: "", score: -1.00 };
 }
+
+
+let IS_RUNNING = false;
 
 
 module.exports = {
@@ -288,15 +297,29 @@ module.exports = {
         .setDescription('Gets data for balls'),
 
     async execute(interaction) {
+        if(IS_RUNNING){
+            interaction.reply("Already running elsewhere. Try again after that finishes.");
+            return;
+        }
+
+        IS_RUNNING = true;
+
         const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-        interaction.reply("This is probably going to take really long. Go do something else and I'll ping you when I'm done.");
+        //interaction.reply("This is probably going to take really long. Go do something else and I'll ping you when I'm done.");
+
+
+        // Reminder for me
+        console.log("\nHey, make sure you set the channel and guild ID in .env\n");
         
+
         // Map of numeric BallsDex spawn message IDs that were verified captured
         // i.e. ones for which we could find catch messages
         // { key: ID of spawn, value: true if verified caught }
         let verifiedCaught = new Map();
 
         // Map of {key: country name, value: number of times it was caught}
+        // WARNING: when using this, the key should be lowercase.
+        // e.g. numCaught.get("Reichtangle") doesn't work, but numCaught.get("reichtangle") does.
         let numCaught = new Map();
         for(let i = 0; i < countries.length; i++){
             numCaught.set(countries[i].toLowerCase(), 0);
@@ -304,6 +327,12 @@ module.exports = {
 
         // Array of [spawn message ID, spawn image URL]
         let spawns = await getSpawns(channel, verifiedCaught, numCaught);
+
+        console.log("------------------------TEST------------------");
+        for(let i = 0; i < 10; i++){
+            console.log(countries[i] + ": " + numCaught.get(countries[i].toLowerCase()));
+        }
+        console.log("------------------------END TEST------------------");
 
         
         // Determine the countries of unverified spawns
@@ -314,13 +343,11 @@ module.exports = {
             let spawnImgURL = spawns[i][1];
 
             // We only want unverified spawns
-            if(verifiedCaught.has(spawnID)){
+            if(verifiedCaught.has(spawnID) && verifiedCaught.get(spawnID) === true){
                 continue;
-
-            } else {
-                unverified.push(spawnImgURL);
-                //console.log("Unverified: " + spawnID + "...");
             }
+
+            unverified.push(spawnImgURL);
         }
 
 
@@ -347,11 +374,12 @@ module.exports = {
                 stillUnverified.push(unverified[i]);
 
             } else {
-                numCaught[guess.country]++;
+                numCaught.set(guess.country, numCaught.get(guess.country) + 1);
             }
 
             console.log((i + 1) + "/" + unverified.length + " done.");
-            //console.log(unverified[i] + "\nIdentified as " + guess.country + " with " + guess.score + " certainty.\n");
+            //console.log(unverified[i] + "\nIdentified as " + guess.country + ", " + guess.score + "%.\n");
+            console.log(guess.country + " set to " + numCaught.get(guess.country) + "\n");
         }
         console.log("Finished. " + (unverified.length - stillUnverified.length) + " balls automatically identified.");
 
@@ -375,9 +403,7 @@ module.exports = {
         dataContents += "\n";
         dataContents += ">>>>>>>>>> Data for verified spawns:\n";
         for(let i = 0; i < countries.length; i++){
-            countries[i] = countries[i].toLowerCase();
-
-            dataContents += (countries[i] + ": " + numCaught.get(countries[i]) + "\n");
+            dataContents += (countries[i] + ": " + numCaught.get(countries[i].toLowerCase()) + "\n");
         }
 
 
@@ -390,12 +416,21 @@ module.exports = {
             content: `<@${interaction.member.user.id}> Your data:`
         });
 
-        
 
+        IS_RUNNING = false;
 
         // TODO (for bugfixing)
         // https://github.com/lovell/sharp/issues/1901
         // Test with Ireland
         // Test # of captures and # of spawns - is it really a cache problem?
+
+        // 1. # of spawns & captures should work correctly.
+        // 2. Are images being recognized properly?
+        /*
+        Total 2468 spawns counted.
+        Now analyzing 512 unverified spawns
+
+        ???
+        */
     }
 };
