@@ -12,13 +12,15 @@ const sharp = require("sharp"); // Sharp is fast for resizing images
 // To use GitHub API endpoints
 const { Octokit } = require("octokit");
 
-
 // Environment variables
 require('dotenv').config();
 
 
+const NEW_SPAWNS_DATE = 1713596400000; // UNIX timestamp of 4/20/2024, adding a few hours just to be safe.
+
 // List of country names
 // From https://ballsdex.miraheze.org/wiki/Rarity_List, 4/15/2024
+// New spawns were added 4/21/2024, but this list is probably accurate up to then.
 // Hudson Bay Company and Polish Underground State are now uncatchable but kept.
 /*
     Circumflex over O in Cote d'Ivoire removed
@@ -85,16 +87,7 @@ let countries = [
     "Luxembourg", "Madagascar", "Mauritania", "Mauritius", "Montenegro",
     "Namibia", "North Macedonia", "Panama", "Papua New Guinea", "Paris Commune",
     "Rwanda", "Senegal", "Sierra Leone", "Somalia", "Suriname",
-    "Timor-Leste", "Djibouti",
-
-
-    // New balls (no spawnart associated yet)
-    "Ming Dynasty", "Majapahit", "Mali Empire", "Second French Empire", "Swedish Empire",
-    "Khedivate of Egypt", "Principality of Moldavia", "Yuan Dynasty", "Republic of Venice",
-    "Safavid Empire", "Kingdom of Sardinia", "Grand Duchy of Tuscany", "Mughal Empire",
-    "Parthian Empire", "Liberian Union", "Fatimid Caliphate", "Austrian Empire", "Kingdom of Brandenburg",
-    "Holy Roman Empire", "Nanda Empire", "Polish-Lithuanian Commonwealth", "Golden Horde",
-    "Khmer Empire", "Kingdom of Hungary", "Qajar Dynasty", "Mongol Empire"
+    "Timor-Leste", "Djibouti"
 ];
 
 /**
@@ -203,8 +196,10 @@ async function getSpawns(channel, verifiedCaught, numCaught){
         const messages = await channel.messages.fetch(options);
 
         // Push messages from BallsDex into an array
+        // Messages must also be before 4/21/2024 (when new spawns were added)
         messages.forEach(msg => {
-            if(msg.author.id === process.env.BALLSDEX_USER_ID){
+            //console.log(msg);
+            if(msg.author.id === process.env.BALLSDEX_USER_ID && msg.createdTimestamp < NEW_SPAWNS_DATE){
                 
                 // Spawns & catch messages
                 if(msg.content.includes("You caught **")){
@@ -305,7 +300,7 @@ module.exports = {
         IS_RUNNING = true;
 
         const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-        //interaction.reply("This is probably going to take really long. Go do something else and I'll ping you when I'm done.");
+        interaction.reply("This is probably going to take really long. Go do something else and I'll ping you when I'm done.");
 
 
         // Reminder for me
@@ -327,12 +322,6 @@ module.exports = {
 
         // Array of [spawn message ID, spawn image URL]
         let spawns = await getSpawns(channel, verifiedCaught, numCaught);
-
-        console.log("------------------------TEST------------------");
-        for(let i = 0; i < 10; i++){
-            console.log(countries[i] + ": " + numCaught.get(countries[i].toLowerCase()));
-        }
-        console.log("------------------------END TEST------------------");
 
         
         // Determine the countries of unverified spawns
@@ -385,7 +374,7 @@ module.exports = {
 
 
         // Organize data into readable format
-        let dataContents = "There were a total of " + spawns.length + " ball spawns in this channel.\n";
+        let dataContents = "There were a total of " + spawns.length + " ball spawns in this channel before " + (new Date(NEW_SPAWNS_DATE).toString()) + ".\n";
         dataContents += "Of these, " + (spawns.length - unverified.length) + " balls were caught.\n";
         dataContents += (unverified.length + " balls remained uncaught.\n");
         dataContents += "\t- Of these, " + (unverified.length - stillUnverified.length) + " balls were identified automatically (95% certainty or more).\n";
